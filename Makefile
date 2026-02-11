@@ -7,7 +7,7 @@ LUA_INC = $(shell pkg-config --cflags lua 2>/dev/null || echo "-I/usr/local/incl
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/sparseset.so
 
-SRCS = sparse_set.c lua_sparse_set.c
+SRCS = sparse-set.c lua-sparse-set.c
 OBJS = $(addprefix $(BUILD_DIR)/, $(SRCS:.c=.o))
 
 all: $(TARGET)

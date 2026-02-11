@@ -51,9 +51,20 @@ local function test_basic_operations()
     local indices = set:indices()
     assert(#indices == 5)
     
-    -- 6. 遍历所有数据 (pairs方法)
-    local all = set:pairs()
-    assert(all[idx1] == "hello world")
+    -- 6. 遍历所有数据 (iter方法)
+    print("\n=== Testing iter ===")
+    print("idx1=", idx1, "idx2=", idx2, "idx3=", idx3, "idx4=", idx4, "idx5=", idx5)
+    local all = {}
+    for _, index, data in set:iter() do
+        print("Index:", index, "Data:", data)
+        all[index] = data
+    end
+    print("\nStored data in all table:")
+    for k, v in pairs(all) do
+        print("  all[" .. k .. "] =", v)
+    end
+    print("\nLooking for idx1=", idx1, "data:", all[idx1])
+    assert(all[idx1] == "hello world", "data is " .. (all[idx1] or "nil"))
     assert(all[idx2].name == "player1")
     assert(all[idx3] == 42)
     assert(all[idx5] == true)

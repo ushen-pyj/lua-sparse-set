@@ -1,7 +1,7 @@
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
-#include "sparse_set.h"
+#include "sparse-set.h"
 
 #define METATABLE_NAME "SparseSet"
 
@@ -44,9 +44,9 @@ static int l_add(lua_State *L) {
     }
     
     // 将数据存储到引用表中
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-    lua_pushvalue(L, 2); // 复制数据
-    lua_rawseti(L, -2, index); // ref_table[index] = data
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);  // 栈: ref_table
+    lua_pushvalue(L, 2);  // 复制数据，栈: ref_table, data
+    lua_rawseti(L, -2, index + 1);  // ref_table[index+1] = data (因为Lua数组1-based)
     lua_pop(L, 1); // 弹出ref_table
     
     // 返回分配的索引
@@ -62,7 +62,7 @@ static int l_remove(lua_State *L) {
         // 从引用表中移除数据
         lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
         lua_pushnil(L);
-        lua_rawseti(L, -2, index); // ref_table[index] = nil
+        lua_rawseti(L, -2, index + 1); // ref_table[index+1] = nil
         lua_pop(L, 1);
         
         lua_pushboolean(L, true);
@@ -88,9 +88,9 @@ static int l_get(lua_State *L) {
         return 1;
     }
     
-    // 从引用表中获取数据
+    // 从Lua表中获取数据 (使用index+1因为Lua数组1-based)
     lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-    lua_rawgeti(L, -1, index); // 获取 ref_table[index]
+    lua_rawgeti(L, -1, index + 1); // 获取 ref_table[index+1]
     return 1;
 }
 
@@ -129,24 +129,43 @@ static int l_gc(lua_State *L) {
     return 0;
 }
 
-// 返回所有的索引和数据对
-static int l_pairs(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
-    sparse_set_t *set = lset->set;
+// 迭代器函数：返回下一个(index, data)对
+static int _iter(lua_State *L) {
+    lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_touserdata(L, 1);
+    int pos = lua_tointeger(L, 2);
     
-    lua_newtable(L);
-    for (uint32_t i = 0; i < set->size; i++) {
-        uint32_t index = sparse_set_get_index(set, i);
-        
-        // 获取数据
-        lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-        lua_rawgeti(L, -1, index);
-        
-        // result[index] = data
-        lua_rawseti(L, -3, index);
-        lua_pop(L, 1); // 弹出ref_table
+    if (pos >= (int)sparse_set_size(lset->set)) {
+        return 0;  // 迭代结束
     }
-    return 1;
+    
+    // 获取当前位置对应的稀疏索引（这是实际分配给用户的idx）
+    uint32_t index = sparse_set_get_index(lset->set, pos);
+    
+    // 返回下一个位置（控制变量）
+    lua_pushinteger(L, pos + 1);
+    
+    // 返回index（迭代变量1 - 这是用户获得的idx）
+    lua_pushinteger(L, index);
+    
+    // 获取并返回数据（迭代变量2）
+    // 注意：数据存储在 ref_table[index+1] 中
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);  // 获取ref_table
+    lua_rawgeti(L, -1, index + 1);  // 获取ref_table[index+1]
+    lua_remove(L, -2);  // 移除ref_table，只保留data
+    
+    return 3;  // 返回: next_pos, index, data
+}
+
+// pairs迭代器接口：用于for循环
+static int l_iter(lua_State *L) {
+    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
+    
+    // 返回迭代器函数、状态(lset)、初始值(0)
+    lua_pushcfunction(L, _iter);
+    lua_pushlightuserdata(L, lset);
+    lua_pushinteger(L, 0);
+    
+    return 3;
 }
 
 // 通过位置索引获取数据 (0-based)
@@ -163,7 +182,7 @@ static int l_at(lua_State *L) {
     
     // 获取数据
     lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-    lua_rawgeti(L, -1, index);
+    lua_rawgeti(L, -1, index + 1);
     return 1;
 }
 
@@ -187,7 +206,7 @@ static const struct luaL_Reg set_methods[] = {
     {"get", l_get},
     {"size", l_size},
     {"clear", l_clear},
-    {"pairs", l_pairs},
+    {"iter", l_iter},
     {"at", l_at},
     {"indices", l_indices},
     {"__gc", l_gc},

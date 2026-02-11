@@ -1,4 +1,4 @@
-#include "sparse_set.h"
+#include "sparse-set.h"
 #include <string.h>
 
 sparse_set_t* sparse_set_create(uint32_t max_size) {
@@ -44,25 +44,12 @@ uint32_t sparse_set_add(sparse_set_t *set) {
 
     uint32_t index;
     
-    // 首先尝试从dense数组后面查找可复用的空闲index
-    // dense[size]位置保存着上一次被移除的index
-    if (set->size < set->capacity) {
-        // 检查dense数组在size位置及之后是否有之前使用过的index可以复用
-        index = set->dense[set->size];
-        
-        // 验证这个index是否可用（未被使用且在有效范围内）
-        if (index <= set->max_val && !sparse_set_contains(set, index)) {
-            // 可以复用这个index
-            set->sparse[index] = set->size;
-            set->size++;
-            return index;
-        }
-    }
-    
-    // 如果无法复用，从0开始查找第一个空闲的index
+    // 从0开始查找第一个空闲的index
     for (index = 0; index <= set->max_val; index++) {
         if (!sparse_set_contains(set, index)) {
+            // 将索引添加到dense数组
             set->dense[set->size] = index;
+            // 在sparse数组中记录位置
             set->sparse[index] = set->size;
             set->size++;
             return index;
@@ -99,5 +86,30 @@ uint32_t sparse_set_get_index(const sparse_set_t *set, uint32_t pos) {
     if (pos < set->size) {
         return set->dense[pos];
     }
-    return 0; // Or some error value
+    return UINT32_MAX;
+}
+
+// 创建迭代器
+sparse_set_iter_t sparse_set_iter(const sparse_set_t *set) {
+    sparse_set_iter_t iter = {
+        .set = set,
+        .current_pos = 0
+    };
+    return iter;
+}
+
+// 获取下一个元素
+// 返回true表示成功获取，false表示已经遍历完成
+// out_index输出当前元素的索引
+bool sparse_set_iter_next(sparse_set_iter_t *iter, uint32_t *out_index) {
+    if (!iter || !iter->set || iter->current_pos >= iter->set->size) {
+        return false;
+    }
+    
+    if (out_index) {
+        *out_index = iter->set->dense[iter->current_pos];
+    }
+    
+    iter->current_pos++;
+    return true;
 }

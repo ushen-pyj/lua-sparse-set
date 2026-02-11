@@ -45,9 +45,13 @@ local function test_sparse_set()
     assert(#indices == 3)
     print("Indices:", table.concat(indices, ", "))
     
-    -- Test pairs
-    local all_data = set:pairs()
-    assert(all_data[idx1] == "hello")
+    -- Test iter
+    local all_data = {}
+    for _, index, data in set:iter() do
+        all_data[index] = data
+    end
+    
+    assert(all_data[idx1] == "hello", all_data[idx1])
     assert(all_data[idx2].x == 100)
     assert(all_data[idx3] == 42)
     
