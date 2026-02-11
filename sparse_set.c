@@ -30,33 +30,33 @@ void sparse_set_destroy(sparse_set_t *set) {
     }
 }
 
-bool sparse_set_contains(const sparse_set_t *set, uint32_t val) {
-    if (val > set->max_val) return false;
-    uint32_t idx = set->sparse[val];
-    return idx < set->size && set->dense[idx] == val;
+bool sparse_set_contains(const sparse_set_t *set, uint32_t index) {
+    if (index > set->max_val) return false;
+    uint32_t pos = set->sparse[index];
+    return pos < set->size && set->dense[pos] == index;
 }
 
-bool sparse_set_add(sparse_set_t *set, uint32_t val) {
-    if (val > set->max_val || set->size >= set->capacity || sparse_set_contains(set, val)) {
+bool sparse_set_add(sparse_set_t *set, uint32_t index) {
+    if (index > set->max_val || set->size >= set->capacity || sparse_set_contains(set, index)) {
         return false;
     }
 
-    set->dense[set->size] = val;
-    set->sparse[val] = set->size;
+    set->dense[set->size] = index;
+    set->sparse[index] = set->size;
     set->size++;
     return true;
 }
 
-bool sparse_set_remove(sparse_set_t *set, uint32_t val) {
-    if (!sparse_set_contains(set, val)) {
+bool sparse_set_remove(sparse_set_t *set, uint32_t index) {
+    if (!sparse_set_contains(set, index)) {
         return false;
     }
 
-    uint32_t idx = set->sparse[val];
-    uint32_t last_val = set->dense[set->size - 1];
+    uint32_t pos = set->sparse[index];
+    uint32_t last_index = set->dense[set->size - 1];
 
-    set->dense[idx] = last_val;
-    set->sparse[last_val] = idx;
+    set->dense[pos] = last_index;
+    set->sparse[last_index] = pos;
     set->size--;
     return true;
 }
@@ -69,9 +69,9 @@ uint32_t sparse_set_size(const sparse_set_t *set) {
     return set->size;
 }
 
-uint32_t sparse_set_get(const sparse_set_t *set, uint32_t index) {
-    if (index < set->size) {
-        return set->dense[index];
+uint32_t sparse_set_get_index(const sparse_set_t *set, uint32_t pos) {
+    if (pos < set->size) {
+        return set->dense[pos];
     }
     return 0; // Or some error value
 }
