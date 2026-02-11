@@ -12,11 +12,10 @@ typedef struct {
 } lua_sparse_set_t;
 
 static int l_create(lua_State *L) {
-    uint32_t max_val = (uint32_t)luaL_checkinteger(L, 1);
-    uint32_t capacity = (uint32_t)luaL_checkinteger(L, 2);
+    uint32_t max_size = (uint32_t)luaL_checkinteger(L, 1);
     
     lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_newuserdata(L, sizeof(lua_sparse_set_t));
-    lset->set = sparse_set_create(max_val, capacity);
+    lset->set = sparse_set_create(max_size);
     
     if (!lset->set) {
         return luaL_error(L, "Failed to create sparse set");
@@ -34,23 +33,24 @@ static int l_create(lua_State *L) {
 
 static int l_add(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
-    uint32_t index = (uint32_t)luaL_checkinteger(L, 2);
-    // 第3个参数是要存储的数据(可以是任何Lua类型)
+    // 第2个参数是要存储的数据(可以是任何Lua类型)
     
-    if (sparse_set_contains(lset->set, index)) {
-        lua_pushboolean(L, false);
+    // C自动分配索引
+    uint32_t index = sparse_set_add(lset->set);
+    
+    if (index == UINT32_MAX) {
+        lua_pushnil(L);  // 失败返回nil
         return 1;
     }
     
     // 将数据存储到引用表中
     lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-    lua_pushvalue(L, 3); // 复制数据
+    lua_pushvalue(L, 2); // 复制数据
     lua_rawseti(L, -2, index); // ref_table[index] = data
     lua_pop(L, 1); // 弹出ref_table
     
-    // 添加索引到sparse set
-    bool success = sparse_set_add(lset->set, index);
-    lua_pushboolean(L, success);
+    // 返回分配的索引
+    lua_pushinteger(L, index);
     return 1;
 }
 

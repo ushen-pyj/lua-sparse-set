@@ -13,11 +13,11 @@ typedef struct {
     uint32_t max_val;
 } sparse_set_t;
 
-sparse_set_t* sparse_set_create(uint32_t max_val, uint32_t capacity);
+sparse_set_t* sparse_set_create(uint32_t max_size);
 void sparse_set_destroy(sparse_set_t *set);
 
 bool sparse_set_contains(const sparse_set_t *set, uint32_t index);
-bool sparse_set_add(sparse_set_t *set, uint32_t index);
+uint32_t sparse_set_add(sparse_set_t *set);  // 自动分配index并返回
 bool sparse_set_remove(sparse_set_t *set, uint32_t index);
 void sparse_set_clear(sparse_set_t *set);
 
