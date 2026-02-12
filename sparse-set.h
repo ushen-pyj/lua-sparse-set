@@ -72,6 +72,8 @@ void sparse_set_clear(sparse_set_t *set);
 
 uint32_t sparse_set_size(const sparse_set_t *set);
 sparse_set_id_t sparse_set_get_id(const sparse_set_t *set, uint32_t pos);
+uint32_t sparse_set_index_of(const sparse_set_t *set, sparse_set_id_t id);
+void sparse_set_swap_at(sparse_set_t *set, uint32_t a, uint32_t b);
 
 typedef struct {
     const sparse_set_t *set;

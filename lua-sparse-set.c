@@ -162,6 +162,62 @@ static int l_set_iter(lua_State *L) {
     return 3;
 }
 
+static int l_set_index_of(lua_State *L) {
+    sparse_set_t *set = get_set(L);
+    sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
+    uint32_t pos = sparse_set_index_of(set, id);
+    if (pos == SPARSE_SET_INVALID_POS) {
+        lua_pushnil(L);
+    } else {
+        lua_pushinteger(L, pos + 1);
+    }
+    return 1;
+}
+
+static int l_set_swap(lua_State *L) {
+    sparse_set_t *set = get_set(L);
+    lua_Integer a_lua = luaL_checkinteger(L, 2);
+    lua_Integer b_lua = luaL_checkinteger(L, 3);
+    
+    if (a_lua < 1 || b_lua < 1) return luaL_error(L, "Index out of bounds");
+    uint32_t a = (uint32_t)(a_lua - 1);
+    uint32_t b = (uint32_t)(b_lua - 1);
+    
+    if (a >= set->size || b >= set->size) {
+        return luaL_error(L, "Index out of bounds");
+    }
+    
+    if (a != b) {
+        sparse_set_swap_at(set, a, b);
+        
+        lua_getiuservalue(L, 1, 1);
+        
+        lua_rawgeti(L, -1, a_lua);
+        lua_rawgeti(L, -2, b_lua);
+        
+        lua_rawseti(L, -3, a_lua);
+        lua_rawseti(L, -2, b_lua);
+        
+        lua_pop(L, 1);
+    }
+    return 0;
+}
+
+static int l_set_at(lua_State *L) {
+    sparse_set_t *set = get_set(L);
+    lua_Integer index = luaL_checkinteger(L, 2);
+    if (index < 1 || index > set->size) return 0;
+    
+    sparse_set_id_t id = set->dense[index - 1];
+    
+    lua_pushinteger(L, id);
+    
+    lua_getiuservalue(L, 1, 1);
+    lua_rawgeti(L, -1, index);
+    lua_remove(L, -2);
+    return 2;
+}
+
 static const struct luaL_Reg reg_methods[] = {
     {"create", l_reg_create_id},
     {"destroy", l_reg_destroy_id},
@@ -170,6 +226,9 @@ static const struct luaL_Reg reg_methods[] = {
 };
 
 static const struct luaL_Reg set_methods[] = {
+    {"at", l_set_at},
+    {"index_of", l_set_index_of},
+    {"swap", l_set_swap},
     {"insert", l_set_insert},
     {"remove", l_set_remove},
     {"contains", l_set_contains},

@@ -1,3 +1,4 @@
+
 #include "sparse-set.h"
 #include <string.h>
 #include <stdlib.h>
@@ -166,6 +167,44 @@ sparse_set_id_t sparse_set_get_id(const sparse_set_t *set, uint32_t pos) {
         return set->dense[pos];
     }
     return ID_NULL;
+}
+
+uint32_t sparse_set_index_of(const sparse_set_t *set, sparse_set_id_t id) {
+    uint32_t index = ID_INDEX(id);
+    uint32_t page_idx = index >> SPARSE_SET_PAGE_SHIFT;
+    
+    if (page_idx >= set->sparse_capacity || !set->sparse[page_idx]) {
+        return SPARSE_SET_INVALID_POS;
+    }
+    
+    uint32_t pos = set->sparse[page_idx][index & SPARSE_SET_PAGE_MASK];
+    if (pos < set->size && set->dense[pos] == id) {
+        return pos;
+    }
+    return SPARSE_SET_INVALID_POS;
+}
+
+void sparse_set_swap_at(sparse_set_t *set, uint32_t a, uint32_t b) {
+    if (a == b || a >= set->size || b >= set->size) {
+        return;
+    }
+    
+    sparse_set_id_t id_a = set->dense[a];
+    sparse_set_id_t id_b = set->dense[b];
+    
+    set->dense[a] = id_b;
+    set->dense[b] = id_a;
+    
+    uint32_t idx_a = ID_INDEX(id_a);
+    uint32_t page_a = idx_a >> SPARSE_SET_PAGE_SHIFT;
+    uint32_t off_a = idx_a & SPARSE_SET_PAGE_MASK;
+    
+    uint32_t idx_b = ID_INDEX(id_b);
+    uint32_t page_b = idx_b >> SPARSE_SET_PAGE_SHIFT;
+    uint32_t off_b = idx_b & SPARSE_SET_PAGE_MASK;
+    
+    set->sparse[page_a][off_a] = b;
+    set->sparse[page_b][off_b] = a; 
 }
 
 sparse_set_iter_t sparse_set_iter(const sparse_set_t *set) {
