@@ -7,9 +7,9 @@
 #define SET_METATABLE "SparseSet"
 
 static int l_reg_create(lua_State *L) {
-    uint32_t max_size = (uint32_t)luaL_checkinteger(L, 1);
     registry_t *reg = (registry_t *)lua_newuserdatauv(L, sizeof(registry_t), 0);
-    if (!registry_init(reg, max_size)) return luaL_error(L, "Failed to create registry");
+    if (!registry_init(reg)) return luaL_error(L, "Failed to create registry");
+
     luaL_getmetatable(L, REGISTRY_METATABLE);
     lua_setmetatable(L, -2);
     return 1;
@@ -44,9 +44,8 @@ static int l_reg_gc(lua_State *L) {
 }
 
 static int l_set_create(lua_State *L) {
-    uint32_t max_size = (uint32_t)luaL_checkinteger(L, 1);
     sparse_set_t *set = (sparse_set_t *)lua_newuserdatauv(L, sizeof(sparse_set_t), 1);
-    if (!sparse_set_init(set, max_size)) return luaL_error(L, "Failed to create set");
+    if (!sparse_set_init(set)) return luaL_error(L, "Failed to create set");
     
     lua_newtable(L);
     lua_setiuservalue(L, -2, 1);
@@ -79,19 +78,17 @@ static int l_set_remove(lua_State *L) {
     sparse_set_t *set = get_set(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
-    uint32_t index = ID_INDEX(id);
-    if (index >= set->capacity) {
-        lua_pushboolean(L, false);
-        return 1;
-    }
-    
-    uint32_t pos = set->sparse[index];
-    if (pos >= set->size || set->dense[pos] != id) {
+    if (!sparse_set_contains(set, id)) {
         lua_pushboolean(L, false);
         return 1;
     }
 
+    uint32_t index = ID_INDEX(id);
+    uint32_t page_idx = index >> SPARSE_SET_PAGE_SHIFT;
+    uint32_t offset = index & SPARSE_SET_PAGE_MASK;
+    uint32_t pos = set->sparse[page_idx][offset];
     uint32_t last_pos = set->size - 1;
+
     if (pos != last_pos) {
         lua_getiuservalue(L, 1, 1);
         lua_rawgeti(L, -1, last_pos + 1);
@@ -114,13 +111,13 @@ static int l_set_get(lua_State *L) {
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
     uint32_t index = ID_INDEX(id);
-    if (index < set->capacity) {
-        uint32_t pos = set->sparse[index];
-        if (pos < set->size && set->dense[pos] == id) {
-            lua_getiuservalue(L, 1, 1);
-            lua_rawgeti(L, -1, pos + 1);
-            return 1;
-        }
+    if (sparse_set_contains(set, id)) {
+        uint32_t page_idx = index >> SPARSE_SET_PAGE_SHIFT;
+        uint32_t offset = index & SPARSE_SET_PAGE_MASK;
+        uint32_t pos = set->sparse[page_idx][offset];
+        lua_getiuservalue(L, 1, 1);
+        lua_rawgeti(L, -1, pos + 1);
+        return 1;
     }
     return 0;
 }

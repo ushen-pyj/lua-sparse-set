@@ -1,10 +1,11 @@
 # lua-sparse-set
+
 ## API
 
 ### 模块函数
 
-- `sparseset.new_registry(max_size)`: 创建一个新的 ID 注册表。
-- `sparseset.new_set(max_size)`: 创建一个新的稀疏集合。
+- `sparseset.new_registry()`: 创建一个新的 ID 注册表。
+- `sparseset.new_set()`: 创建一个新的稀疏集合。
 
 ### Registry 方法
 
@@ -26,32 +27,27 @@
 ```lua
 local sparse_set = require("sparseset")
 
-local size = 100
-local reg = sparse_set.new_registry(size)
-local set = sparse_set.new_set(size)
+-- 1. 创建对象 (无需参数)
+local reg = sparse_set.new_registry()
+local set = sparse_set.new_set()
 
--- 创建 ID
+-- 2. 创建版本化 ID
 local id1 = reg:create()
 local id2 = reg:create()
 
--- 插入数据 (ID, Value)
+-- 3. 关联数据
 set:insert(id1, "hello")
 set:insert(id2, { world = true })
 
--- 获取数据
+-- 4. 访问数据
 print(set:get(id1)) -- "hello"
 
--- 检查包含
-if set:contains(id2) then
-    print("set contains id2")
-end
-
--- 遍历 (索引, ID, 数据)
+-- 5. 迭代遍历 (索引, ID, 数据)
 for i, id, data in set:iter() do
     print(i, id, data)
 end
 
--- 移除
+-- 6. 回收
 set:remove(id1)
 reg:destroy(id1)
 ```

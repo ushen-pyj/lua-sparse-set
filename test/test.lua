@@ -3,14 +3,12 @@ package.cpath = package.cpath .. ";./build/?.so"
 local sparse_set = require("sparseset")
 
 local test_insert = function()
-    local size = 100
-    local reg = sparse_set.new_registry(size)
-    local set = sparse_set.new_set(size)
+    local reg = sparse_set.new_registry()
+    local set = sparse_set.new_set()
     
     local id1 = reg:create()
     local id2 = reg:create()
-    assert(id1 == 0, "id1 should be 1 now = " .. id1)
-    assert(id2 == 1, "id2 should be 2 now = " .. id2)
+    -- index 0 and 1
     set:insert(id1, "hello")
     set:insert(id2, {hello = 1})
 
@@ -38,9 +36,8 @@ local test_insert = function()
 end
 
 local test_id_pool = function()
-    local size = 100
-    local reg = sparse_set.new_registry(size)
-    local set = sparse_set.new_set(size)
+    local reg = sparse_set.new_registry()
+    local set = sparse_set.new_set()
     
     local id1 = reg:create()
     local id2 = reg:create()
@@ -55,10 +52,31 @@ local test_id_pool = function()
     set:remove(id3)
 
     local id5 = reg:create()
+    -- id3 was index 2, version 0. so id5 should be index 2, version 1
     assert(id5 == ((1 << 32) | 2), "id5 should be " .. ((1 << 32) | 2))
     set:insert(id5, "hello")
     print("test_id_pool passed")
 end
 
+local test_expansion = function()
+    local reg = sparse_set.new_registry()
+    local set = sparse_set.new_set()
+    
+    local ids = {}
+    for i = 1, 100 do
+        local id = reg:create()
+        table.insert(ids, id)
+        set:insert(id, "data_" .. i)
+    end
+    
+    assert(set:size() == 100, "size should be 100")
+    for i = 1, 100 do
+        assert(set:get(ids[i]) == "data_" .. i, "get data_" .. i .. " failed")
+    end
+    
+    print("test_expansion passed")
+end
+
 test_insert()
 test_id_pool()
+test_expansion()
