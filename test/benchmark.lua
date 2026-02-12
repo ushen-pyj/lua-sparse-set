@@ -36,8 +36,9 @@ end
 local arr = {}
 local res_array = benchmark("Lua Array", 
     function()
+        local tinsert = table.insert
         for i, v in ipairs(hash_key) do
-            table.insert(arr, v)
+            tinsert(arr, v)
         end
     end,
     function()
@@ -51,8 +52,9 @@ local res_array = benchmark("Lua Array",
         end
     end,
     function()
+        local tremove = table.remove
         for i = 1, size do
-            table.remove(arr)
+            tremove(arr)
         end
     end
 )
@@ -84,18 +86,20 @@ local res_hash = benchmark("Lua Hash",
 local reg = sparse_set.new_registry(size)
 local set = sparse_set.new_set(size)
 local entities = {}
+local create = reg.create
+local insert = set.insert
 local res_sparse = benchmark("Sparse Set",
     function()
         for i = 1, size do
-            local e = reg:create()
+            local e = create(reg)
             entities[i] = e
-            set:insert(e, i)
+            insert(set, e, i)
         end
     end,
     function()
-        local s
+        local get = set.get
         for i = 1, size do
-            s = set:get(entities[i])
+            s = get(set, entities[i])
         end
     end,
     function()
@@ -103,8 +107,9 @@ local res_sparse = benchmark("Sparse Set",
         end
     end,
     function()
+        local remove = set.remove
         for i = 1, size do
-            set:remove(entities[i])
+            remove(set, entities[i])
         end
     end
 )

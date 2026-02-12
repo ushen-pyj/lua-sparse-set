@@ -69,14 +69,29 @@ static int l_set_create(lua_State *L) {
 static int l_set_insert(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
-    if (lua_gettop(L) < 3) {
-        luaL_error(L, "Missing value for insert");
-    }
     
-    uint32_t pos = sparse_set_insert(lset->set, id);
-    if (pos == SPARSE_SET_INVALID_POS) {
+    sparse_set_t *set = lset->set;
+    uint32_t index = ID_INDEX(id);
+    if (index >= set->capacity) {
         lua_pushboolean(L, false);
         return 1;
+    }
+    
+    uint32_t pos = set->sparse[index];
+    if (pos < set->size && ID_INDEX(set->dense[pos]) == index) {
+        if (set->dense[pos] == id) {
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        set->dense[pos] = id;
+    } else {
+        if (set->size >= set->capacity) {
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        pos = set->size++;
+        set->dense[pos] = id;
+        set->sparse[index] = pos;
     }
     
     lua_getiuservalue(L, 1, 1);
@@ -92,23 +107,35 @@ static int l_set_remove(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
-    if (!sparse_set_contains(lset->set, id)) {
+    sparse_set_t *set = lset->set;
+    uint32_t index = ID_INDEX(id);
+    if (index >= set->capacity) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    
+    uint32_t pos = set->sparse[index];
+    if (pos >= set->size || set->dense[pos] != id) {
         lua_pushboolean(L, false);
         return 1;
     }
 
-    uint32_t index = ID_INDEX(id);
-    uint32_t pos = lset->set->sparse[index];
-    uint32_t last_pos = lset->set->size - 1;
-
+    uint32_t last_pos = --set->size;
     lua_getiuservalue(L, 1, 1);
-    lua_rawgeti(L, -1, last_pos + 1);
-    lua_rawseti(L, -2, pos + 1);
+    if (pos != last_pos) {
+        sparse_set_id_t last_id = set->dense[last_pos];
+        set->dense[pos] = last_id;
+        set->sparse[ID_INDEX(last_id)] = pos;
+        
+        lua_rawgeti(L, -1, last_pos + 1);
+        lua_rawseti(L, -2, pos + 1);
+    }
+    
     lua_pushnil(L);
     lua_rawseti(L, -2, last_pos + 1);
     lua_pop(L, 1);
 
-    sparse_set_remove(lset->set, id);
+    set->sparse[index] = 0xFFFFFFFF; // Reset sparse entry
     lua_pushboolean(L, true);
     return 1;
 }
@@ -116,13 +143,18 @@ static int l_set_remove(lua_State *L) {
 static int l_set_get(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
-    if (!sparse_set_contains(lset->set, id)) return 0;
     
+    sparse_set_t *set = lset->set;
     uint32_t index = ID_INDEX(id);
-    uint32_t pos = lset->set->sparse[index];
-    lua_getiuservalue(L, 1, 1);
-    lua_rawgeti(L, -1, pos + 1);
-    return 1;
+    if (index < set->capacity) {
+        uint32_t pos = set->sparse[index];
+        if (pos < set->size && set->dense[pos] == id) {
+            lua_getiuservalue(L, 1, 1);
+            lua_rawgeti(L, -1, pos + 1);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static int l_set_contains(lua_State *L) {
