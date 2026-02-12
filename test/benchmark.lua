@@ -97,8 +97,8 @@ local function run_benchmark()
     
     -- INSERT
     t1 = os_clock()
-    for i = 1, COUNT do
-        hash_t[hash_keys[i]] = TEST_DATA
+    for _, k in ipairs(hash_keys) do
+        hash_t[k] = TEST_DATA
     end
     d1 = os_clock() - t1
     print_result("Insert", d1)
@@ -106,8 +106,8 @@ local function run_benchmark()
     -- READ
     t2 = os_clock()
     dummy = 0
-    for i = 1, COUNT do
-        local v = hash_t[hash_keys[i]]
+    for _, k in ipairs(hash_keys) do
+        local v = hash_t[k]
         if v then dummy = dummy + 1 end
     end
     d2 = os_clock() - t2
@@ -124,11 +124,10 @@ local function run_benchmark()
 
     -- CLEANUP
     hash_t = nil
-    hash_keys = nil
     collectgarbage()
 
     -------------------------------------------------------
-    -- 3. Sparse Set
+    -- 3. Sparse Set (C Extension)
     -------------------------------------------------------
     print_header("Sparse Set (C Extension)")
     
@@ -139,7 +138,7 @@ local function run_benchmark()
     -- Note: We store indices to be able to read back.
     -- The overhead of 'indices[i] = ...' is included, which is fair as you usually need to keep the handle.
     t1 = os_clock()
-    for i = 1, COUNT do
+    for i in ipairs(hash_keys) do
         indices[i] = set:add(TEST_DATA)
     end
     d1 = os_clock() - t1
@@ -148,7 +147,7 @@ local function run_benchmark()
     -- READ
     t2 = os_clock()
     dummy = 0
-    for i = 1, COUNT do
+    for i in ipairs(hash_keys) do
         local v = set:get(indices[i])
         if v then dummy = dummy + 1 end
     end
@@ -166,6 +165,47 @@ local function run_benchmark()
     
     -- CLEANUP
     set:clear() -- Explicit clear testing (optional)
+    set = nil
+    indices = nil
+    collectgarbage()
+
+    -------------------------------------------------------
+    -- 4. Sparse Set (Pure Lua)
+    -------------------------------------------------------
+    print_header("Sparse Set (Pure Lua)")
+    
+    local lua_sparseset = require("lua-sparse-set")
+    local set = lua_sparseset.new(COUNT)
+    local indices = {}
+    
+    -- INSERT
+    t1 = os_clock()
+    for i in ipairs(hash_keys) do
+        indices[i] = set:add(TEST_DATA)
+    end
+    d1 = os_clock() - t1
+    print_result("Insert (+store idx)", d1)
+    
+    -- READ
+    t2 = os_clock()
+    dummy = 0
+    for i in ipairs(hash_keys) do
+        local v = set:get(indices[i])
+        if v then dummy = dummy + 1 end
+    end
+    d2 = os_clock() - t2
+    print_result("Read (by index)", d2)
+    
+    -- ITERATION
+    t3 = os_clock()
+    dummy = 0
+    for _, idx, val in set:iter() do
+        dummy = dummy + 1
+    end
+    d3 = os_clock() - t3
+    print_result("Iterate", d3)
+    
+    -- CLEANUP
     set = nil
     indices = nil
     collectgarbage()

@@ -8,22 +8,25 @@
 // Lua绑定的sparse_set结构
 typedef struct {
     sparse_set_t *set;  // 底层C的sparse set，只管理索引
-    int ref_table;      // Lua注册表中存储数据的表引用
+    // ref_table removed; using UserValue 1 instead
 } lua_sparse_set_t;
 
 static int l_create(lua_State *L) {
     uint32_t max_size = (uint32_t)luaL_checkinteger(L, 1);
     
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_newuserdata(L, sizeof(lua_sparse_set_t));
+    // Create userdata with 1 user value
+    // lua_newuserdatauv is available in Lua 5.4
+    lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_newuserdatauv(L, sizeof(lua_sparse_set_t), 1);
     lset->set = sparse_set_create(max_size);
     
     if (!lset->set) {
         return luaL_error(L, "Failed to create sparse set");
     }
 
-    // 创建一个表用于存储Lua数据引用
+    // Create a table for storage
     lua_newtable(L);
-    lset->ref_table = luaL_ref(L, LUA_REGISTRYINDEX);
+    // Set it as the first user value of the userdata (at stack -2)
+    lua_setiuservalue(L, -2, 1);
 
     luaL_getmetatable(L, METATABLE_NAME);
     lua_setmetatable(L, -2);
@@ -33,23 +36,23 @@ static int l_create(lua_State *L) {
 
 static int l_add(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
-    // 第2个参数是要存储的数据(可以是任何Lua类型)
+    // arg 2 is data
     
-    // C自动分配索引
+    // C allocates index
     uint32_t index = sparse_set_add(lset->set);
     
     if (index == UINT32_MAX) {
-        lua_pushnil(L);  // 失败返回nil
+        lua_pushnil(L);
         return 1;
     }
     
-    // 将数据存储到引用表中
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);  // 栈: ref_table
-    lua_pushvalue(L, 2);  // 复制数据，栈: ref_table, data
-    lua_rawseti(L, -2, index + 1);  // ref_table[index+1] = data (因为Lua数组1-based)
-    lua_pop(L, 1); // 弹出ref_table
+    // Get storage table (UserValue 1)
+    lua_getiuservalue(L, 1, 1);
+    lua_pushvalue(L, 2); // push data
+    lua_rawseti(L, -2, index + 1); // table[index+1] = data
+    lua_pop(L, 1); // pop table
     
-    // 返回分配的索引
+    // Return index
     lua_pushinteger(L, index);
     return 1;
 }
@@ -59,10 +62,10 @@ static int l_remove(lua_State *L) {
     uint32_t index = (uint32_t)luaL_checkinteger(L, 2);
     
     if (sparse_set_remove(lset->set, index)) {
-        // 从引用表中移除数据
-        lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
+        // Remove from storage table
+        lua_getiuservalue(L, 1, 1);
         lua_pushnil(L);
-        lua_rawseti(L, -2, index + 1); // ref_table[index+1] = nil
+        lua_rawseti(L, -2, index + 1);
         lua_pop(L, 1);
         
         lua_pushboolean(L, true);
@@ -84,12 +87,17 @@ static int l_get(lua_State *L) {
     uint32_t index = (uint32_t)luaL_checkinteger(L, 2);
     
     // Optimization: Skip sparse_set_contains check.
-    // The ref_table is kept in sync with the set.
-    // If index is invalid or removed, ref_table[index+1] will be nil.
+    // Sync is guaranteed.
+    (void)lset; // Suppress unused variable warning
+
     
-    // Get data from Lua table (using index+1 because Lua arrays are 1-based)
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-    lua_rawgeti(L, -1, index + 1); // get ref_table[index+1]
+    lua_getiuservalue(L, 1, 1); // push storage table
+    lua_rawgeti(L, -1, index + 1); // push value: stack: [ud, idx, table, value]
+    
+    // We want to return value.
+    // We can cleanup stack or just return 1 (top value).
+    // To be clean, replace -2 (table) with -1 (value)
+    lua_replace(L, -2); // stack: [ud, idx, value]
     return 1;
 }
 
@@ -103,12 +111,12 @@ static int l_clear(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
     sparse_set_clear(lset->set);
     
-    // 清空引用表
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
+    // Clear storage table
+    lua_getiuservalue(L, 1, 1);
     lua_pushnil(L);
     while (lua_next(L, -2)) {
-        lua_pop(L, 1); // 弹出value
-        lua_pushvalue(L, -1); // 复制key
+        lua_pop(L, 1); // pop value
+        lua_pushvalue(L, -1); // copy key
         lua_pushnil(L);
         lua_rawset(L, -4); // table[key] = nil
     }
@@ -123,52 +131,41 @@ static int l_gc(lua_State *L) {
         sparse_set_destroy(lset->set);
         lset->set = NULL;
     }
-    // 释放引用表
-    luaL_unref(L, LUA_REGISTRYINDEX, lset->ref_table);
+    // UserValue is collected automatically when userdata is collected.
     return 0;
 }
 
-// 迭代器函数：返回下一个(index, data)对
 // Iterator function: returns next (pos, index, data) tuple
-static int _iter(lua_State *L) {
-    // Upvalue 1: ref_table (Lua table)
-    // Argument 1: lset (lightuserdata)
-    // Argument 2: pos (integer)
-    
+// _iter removed; using _iter_optimized
+
+
+static int _iter_optimized(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_touserdata(L, 1);
     int pos = lua_tointeger(L, 2);
     
     if (pos >= (int)sparse_set_size(lset->set)) {
-        return 0;  // End of iteration
+        return 0;
     }
     
-    // Get sparse index for current dense position
     uint32_t index = sparse_set_get_index(lset->set, pos);
     
-    // Return next position (control variable)
     lua_pushinteger(L, pos + 1);
-    
-    // Return index (iteration var 1)
     lua_pushinteger(L, index);
     
-    // Get and return data (iteration var 2)
-    // Using Upvalue 1 for ref_table avoids registry lookup
-    lua_pushvalue(L, lua_upvalueindex(1)); 
-    lua_rawgeti(L, -1, index + 1);  // get ref_table[index+1]
-    lua_remove(L, -2);  // remove ref_table, leave data
+    // Directly access upvalue table
+    lua_rawgeti(L, lua_upvalueindex(1), index + 1);
     
-    return 3;  // Returns: next_pos, index, data
+    return 3;
 }
 
 // pairs iterator interface
 static int l_iter(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
     
-    // Push ref_table to stack to use as upvalue
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
+    // Push storage table as upvalue
+    lua_getiuservalue(L, 1, 1);
     
-    // Push iterator function as closure with 1 upvalue (ref_table)
-    lua_pushcclosure(L, _iter, 1);
+    lua_pushcclosure(L, _iter_optimized, 1);
     
     lua_pushlightuserdata(L, lset);
     lua_pushinteger(L, 0);
@@ -176,7 +173,6 @@ static int l_iter(lua_State *L) {
     return 3;
 }
 
-// 通过位置索引获取数据 (0-based)
 static int l_at(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
     uint32_t pos = (uint32_t)luaL_checkinteger(L, 2);
@@ -188,13 +184,12 @@ static int l_at(lua_State *L) {
     
     uint32_t index = sparse_set_get_index(lset->set, pos);
     
-    // 获取数据
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
+    lua_getiuservalue(L, 1, 1);
     lua_rawgeti(L, -1, index + 1);
+    lua_replace(L, -2);
     return 1;
 }
 
-// 获取所有索引(keys)
 static int l_indices(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
     sparse_set_t *set = lset->set;

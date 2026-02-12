@@ -19,7 +19,6 @@ sparse_set_t* sparse_set_create(uint32_t max_size) {
     set->capacity = max_size;
     set->max_val = max_size - 1;
 
-    // 初始化dense数组，填满所有可用索引
     for (uint32_t i = 0; i < max_size; i++) {
         set->dense[i] = i;
     }
@@ -42,19 +41,12 @@ bool sparse_set_contains(const sparse_set_t *set, uint32_t index) {
 }
 
 uint32_t sparse_set_add(sparse_set_t *set) {
-    // 如果已满，返回错误值
     if (set->size >= set->capacity) {
         return UINT32_MAX;
     }
-
-    // 直接从dense数组末尾获取下一个可用索引 (O(1))
-    // dense数组中 [size...capacity-1] 的部分存储了所有未使用的索引
     uint32_t index = set->dense[set->size];
-    
-    // 在sparse数组中记录位置
     set->sparse[index] = set->size;
     set->size++;
-    
     return index;
 }
 
@@ -68,8 +60,6 @@ bool sparse_set_remove(sparse_set_t *set, uint32_t index) {
 
     set->dense[pos] = last_index;
     set->sparse[last_index] = pos;
-    
-    // 将删除的索引放回dense数组的有效区末尾 (recycling)
     set->dense[set->size - 1] = index;
     
     set->size--;
