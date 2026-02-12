@@ -12,9 +12,9 @@ local function test_sparse_set()
     local idx1 = set:add("hello")
     local idx2 = set:add({x = 100, y = 200})
     local idx3 = set:add(42)
-    assert(idx1 ~= nil)
-    assert(idx2 ~= nil)
-    assert(idx3 ~= nil)
+    assert(idx1 == 0)
+    assert(idx2 == 1)
+    assert(idx3 == 2)
     print("Allocated indices:", idx1, idx2, idx3)
     assert(set:size() == 3)
     
@@ -32,12 +32,13 @@ local function test_sparse_set()
     assert(set:contains(99) == false)
     
     -- Test at (position-based access)
+    -- Test at (position-based access)
     local data0 = set:at(0)
     local data1 = set:at(1)
     local data2 = set:at(2)
-    assert(data0 ~= nil)
-    assert(data1 ~= nil)
-    assert(data2 ~= nil)
+    assert(data0 == "hello")
+    assert(data1.x == 100 and data1.y == 200)
+    assert(data2 == 42)
     assert(set:at(3) == nil) -- out of range
     
     -- Test indices
@@ -65,6 +66,9 @@ local function test_sparse_set()
     -- Test add after remove - 应该复用idx1
     local idx4 = set:add("reused")
     print("After remove and add, new index:", idx4, "(should try to reuse)", idx1)
+    assert(idx4 == idx1, "Should reuse freed index")
+    local idx5 = set:add("reused2")
+    assert(idx5 == 3, "Should get new index " .. idx5 )
     
     -- Test add more complex data
     local idx5 = set:add(function() return "closure" end)

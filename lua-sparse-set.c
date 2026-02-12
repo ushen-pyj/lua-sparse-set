@@ -83,14 +83,13 @@ static int l_get(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
     uint32_t index = (uint32_t)luaL_checkinteger(L, 2);
     
-    if (!sparse_set_contains(lset->set, index)) {
-        lua_pushnil(L);
-        return 1;
-    }
+    // Optimization: Skip sparse_set_contains check.
+    // The ref_table is kept in sync with the set.
+    // If index is invalid or removed, ref_table[index+1] will be nil.
     
-    // 从Lua表中获取数据 (使用index+1因为Lua数组1-based)
+    // Get data from Lua table (using index+1 because Lua arrays are 1-based)
     lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
-    lua_rawgeti(L, -1, index + 1); // 获取 ref_table[index+1]
+    lua_rawgeti(L, -1, index + 1); // get ref_table[index+1]
     return 1;
 }
 
@@ -130,38 +129,47 @@ static int l_gc(lua_State *L) {
 }
 
 // 迭代器函数：返回下一个(index, data)对
+// Iterator function: returns next (pos, index, data) tuple
 static int _iter(lua_State *L) {
+    // Upvalue 1: ref_table (Lua table)
+    // Argument 1: lset (lightuserdata)
+    // Argument 2: pos (integer)
+    
     lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_touserdata(L, 1);
     int pos = lua_tointeger(L, 2);
     
     if (pos >= (int)sparse_set_size(lset->set)) {
-        return 0;  // 迭代结束
+        return 0;  // End of iteration
     }
     
-    // 获取当前位置对应的稀疏索引（这是实际分配给用户的idx）
+    // Get sparse index for current dense position
     uint32_t index = sparse_set_get_index(lset->set, pos);
     
-    // 返回下一个位置（控制变量）
+    // Return next position (control variable)
     lua_pushinteger(L, pos + 1);
     
-    // 返回index（迭代变量1 - 这是用户获得的idx）
+    // Return index (iteration var 1)
     lua_pushinteger(L, index);
     
-    // 获取并返回数据（迭代变量2）
-    // 注意：数据存储在 ref_table[index+1] 中
-    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);  // 获取ref_table
-    lua_rawgeti(L, -1, index + 1);  // 获取ref_table[index+1]
-    lua_remove(L, -2);  // 移除ref_table，只保留data
+    // Get and return data (iteration var 2)
+    // Using Upvalue 1 for ref_table avoids registry lookup
+    lua_pushvalue(L, lua_upvalueindex(1)); 
+    lua_rawgeti(L, -1, index + 1);  // get ref_table[index+1]
+    lua_remove(L, -2);  // remove ref_table, leave data
     
-    return 3;  // 返回: next_pos, index, data
+    return 3;  // Returns: next_pos, index, data
 }
 
-// pairs迭代器接口：用于for循环
+// pairs iterator interface
 static int l_iter(lua_State *L) {
     lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, METATABLE_NAME);
     
-    // 返回迭代器函数、状态(lset)、初始值(0)
-    lua_pushcfunction(L, _iter);
+    // Push ref_table to stack to use as upvalue
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lset->ref_table);
+    
+    // Push iterator function as closure with 1 upvalue (ref_table)
+    lua_pushcclosure(L, _iter, 1);
+    
     lua_pushlightuserdata(L, lset);
     lua_pushinteger(L, 0);
     
