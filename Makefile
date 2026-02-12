@@ -8,20 +8,16 @@ BUILD_DIR = build
 TARGET = $(BUILD_DIR)/sparseset.so
 
 SRCS = sparse-set.c lua-sparse-set.c
-OBJS = $(addprefix $(BUILD_DIR)/, $(SRCS:.c=.o))
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $^
-
-$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(LUA_INC) -c $< -o $@
+$(TARGET): $(SRCS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(LUA_INC) $(LDFLAGS) -o $@ $^
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -rf $(BUILD_DIR)
 
 test: all
 	lua test.lua

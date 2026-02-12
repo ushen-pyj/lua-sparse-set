@@ -5,33 +5,53 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+typedef uint64_t sparse_set_id_t;
+
+#define ID_NULL UINT64_MAX
+#define ID_INDEX(id) ((uint32_t)(id & 0xFFFFFFFF))
+#define ID_VERSION(id) ((uint32_t)((id >> 32) & 0xFFFFFFFF))
+#define ID_MAKE(index, version) (((uint64_t)(version) << 32) | (index))
+
 typedef struct {
-    uint32_t *sparse;   // sparse数组：通过索引(key)查找在dense中的位置
-    uint32_t *dense;    // dense数组：存储实际的索引(key)
+    uint32_t *generations;
+    uint32_t *recycle;
+    uint32_t recycle_count;
+    uint32_t next_index;
+    uint32_t capacity;
+} registry_t;
+
+typedef struct {
+    uint32_t *sparse;
+    sparse_set_id_t *dense;
     uint32_t size;
     uint32_t capacity;
-    uint32_t max_val;
 } sparse_set_t;
 
-// 迭代器结构
-typedef struct {
-    const sparse_set_t *set;  // 指向要迭代的set
-    uint32_t current_pos;     // 当前迭代位置
-} sparse_set_iter_t;
+registry_t* registry_create(uint32_t max_size);
+void registry_destroy(registry_t *reg);
+sparse_set_id_t registry_create_id(registry_t *reg);
+void registry_recycle(registry_t *reg, sparse_set_id_t id);
+bool registry_valid(const registry_t *reg, sparse_set_id_t id);
 
 sparse_set_t* sparse_set_create(uint32_t max_size);
 void sparse_set_destroy(sparse_set_t *set);
 
-bool sparse_set_contains(const sparse_set_t *set, uint32_t index);
-uint32_t sparse_set_add(sparse_set_t *set);  // 自动分配index并返回
-bool sparse_set_remove(sparse_set_t *set, uint32_t index);
+#define SPARSE_SET_INVALID_POS UINT32_MAX
+
+bool sparse_set_contains(const sparse_set_t *set, sparse_set_id_t id);
+uint32_t sparse_set_insert(sparse_set_t *set, sparse_set_id_t id);
+bool sparse_set_remove(sparse_set_t *set, sparse_set_id_t id);
 void sparse_set_clear(sparse_set_t *set);
 
 uint32_t sparse_set_size(const sparse_set_t *set);
-uint32_t sparse_set_get_index(const sparse_set_t *set, uint32_t pos);
+sparse_set_id_t sparse_set_get_id(const sparse_set_t *set, uint32_t pos);
 
-// 迭代器接口
-sparse_set_iter_t sparse_set_iter(const sparse_set_t *set);  // 创建迭代器
-bool sparse_set_iter_next(sparse_set_iter_t *iter, uint32_t *out_index);  // 获取下一个元素
+typedef struct {
+    const sparse_set_t *set;
+    uint32_t current_pos;
+} sparse_set_iter_t;
+
+sparse_set_iter_t sparse_set_iter(const sparse_set_t *set);
+bool sparse_set_iter_next(sparse_set_iter_t *iter, sparse_set_id_t *out_id);
 
 #endif // SPARSE_SET_H
