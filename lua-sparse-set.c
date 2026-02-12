@@ -6,57 +6,47 @@
 #define REGISTRY_METATABLE "SparseRegistry"
 #define SET_METATABLE "SparseSet"
 
-typedef struct {
-    registry_t *reg;
-} lua_registry_t;
-
 static int l_reg_create(lua_State *L) {
     uint32_t max_size = (uint32_t)luaL_checkinteger(L, 1);
-    lua_registry_t *lr = (lua_registry_t *)lua_newuserdatauv(L, sizeof(lua_registry_t), 0);
-    lr->reg = registry_create(max_size);
-    if (!lr->reg) return luaL_error(L, "Failed to create registry");
+    registry_t *reg = (registry_t *)lua_newuserdatauv(L, sizeof(registry_t), 0);
+    if (!registry_init(reg, max_size)) return luaL_error(L, "Failed to create registry");
     luaL_getmetatable(L, REGISTRY_METATABLE);
     lua_setmetatable(L, -2);
     return 1;
 }
 
 static int l_reg_create_id(lua_State *L) {
-    lua_registry_t *lr = (lua_registry_t *)luaL_checkudata(L, 1, REGISTRY_METATABLE);
-    sparse_set_id_t id = registry_create_id(lr->reg);
+    registry_t *reg = get_reg(L);
+    sparse_set_id_t id = registry_create_id(reg);
     if (id == ID_NULL) lua_pushnil(L);
     else lua_pushinteger(L, id);
     return 1;
 }
 
 static int l_reg_destroy_id(lua_State *L) {
-    lua_registry_t *lr = (lua_registry_t *)luaL_checkudata(L, 1, REGISTRY_METATABLE);
+    registry_t *reg = get_reg(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
-    registry_recycle(lr->reg, id);
+    registry_recycle(reg, id);
     return 0;
 }
 
 static int l_reg_valid(lua_State *L) {
-    lua_registry_t *lr = (lua_registry_t *)luaL_checkudata(L, 1, REGISTRY_METATABLE);
+    registry_t *reg = get_reg(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
-    lua_pushboolean(L, registry_valid(lr->reg, id));
+    lua_pushboolean(L, registry_valid(reg, id));
     return 1;
 }
 
 static int l_reg_gc(lua_State *L) {
-    lua_registry_t *lr = (lua_registry_t *)luaL_checkudata(L, 1, REGISTRY_METATABLE);
-    if (lr->reg) registry_destroy(lr->reg);
+    registry_t *reg = get_reg(L);
+    registry_deinit(reg);
     return 0;
 }
 
-typedef struct {
-    sparse_set_t *set;
-} lua_sparse_set_t;
-
 static int l_set_create(lua_State *L) {
     uint32_t max_size = (uint32_t)luaL_checkinteger(L, 1);
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_newuserdatauv(L, sizeof(lua_sparse_set_t), 1);
-    lset->set = sparse_set_create(max_size);
-    if (!lset->set) return luaL_error(L, "Failed to create set");
+    sparse_set_t *set = (sparse_set_t *)lua_newuserdatauv(L, sizeof(sparse_set_t), 1);
+    if (!sparse_set_init(set, max_size)) return luaL_error(L, "Failed to create set");
     
     lua_newtable(L);
     lua_setiuservalue(L, -2, 1);
@@ -67,31 +57,13 @@ static int l_set_create(lua_State *L) {
 }
 
 static int l_set_insert(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
+    sparse_set_t *set = get_set(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
-    sparse_set_t *set = lset->set;
-    uint32_t index = ID_INDEX(id);
-    if (index >= set->capacity) {
+    uint32_t pos = sparse_set_insert(set, id);
+    if (pos == SPARSE_SET_INVALID_POS) {
         lua_pushboolean(L, false);
         return 1;
-    }
-    
-    uint32_t pos = set->sparse[index];
-    if (pos < set->size && ID_INDEX(set->dense[pos]) == index) {
-        if (set->dense[pos] == id) {
-            lua_pushboolean(L, false);
-            return 1;
-        }
-        set->dense[pos] = id;
-    } else {
-        if (set->size >= set->capacity) {
-            lua_pushboolean(L, false);
-            return 1;
-        }
-        pos = set->size++;
-        set->dense[pos] = id;
-        set->sparse[index] = pos;
     }
     
     lua_getiuservalue(L, 1, 1);
@@ -104,10 +76,9 @@ static int l_set_insert(lua_State *L) {
 }
 
 static int l_set_remove(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
+    sparse_set_t *set = get_set(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
-    sparse_set_t *set = lset->set;
     uint32_t index = ID_INDEX(id);
     if (index >= set->capacity) {
         lua_pushboolean(L, false);
@@ -120,31 +91,28 @@ static int l_set_remove(lua_State *L) {
         return 1;
     }
 
-    uint32_t last_pos = --set->size;
-    lua_getiuservalue(L, 1, 1);
+    uint32_t last_pos = set->size - 1;
     if (pos != last_pos) {
-        sparse_set_id_t last_id = set->dense[last_pos];
-        set->dense[pos] = last_id;
-        set->sparse[ID_INDEX(last_id)] = pos;
-        
+        lua_getiuservalue(L, 1, 1);
         lua_rawgeti(L, -1, last_pos + 1);
         lua_rawseti(L, -2, pos + 1);
+        lua_pop(L, 1);
     }
     
+    lua_getiuservalue(L, 1, 1);
     lua_pushnil(L);
     lua_rawseti(L, -2, last_pos + 1);
     lua_pop(L, 1);
 
-    set->sparse[index] = 0xFFFFFFFF;
+    sparse_set_remove(set, id);
     lua_pushboolean(L, true);
     return 1;
 }
 
 static int l_set_get(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
+    sparse_set_t *set = get_set(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
-    sparse_set_t *set = lset->set;
     uint32_t index = ID_INDEX(id);
     if (index < set->capacity) {
         uint32_t pos = set->sparse[index];
@@ -158,30 +126,30 @@ static int l_set_get(lua_State *L) {
 }
 
 static int l_set_contains(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
+    sparse_set_t *set = get_set(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
-    lua_pushboolean(L, sparse_set_contains(lset->set, id));
+    lua_pushboolean(L, sparse_set_contains(set, id));
     return 1;
 }
 
 static int l_set_size(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
-    lua_pushinteger(L, sparse_set_size(lset->set));
+    sparse_set_t *set = get_set(L);
+    lua_pushinteger(L, sparse_set_size(set));
     return 1;
 }
 
 static int l_set_gc(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
-    if (lset->set) sparse_set_destroy(lset->set);
+    sparse_set_t *set = get_set(L);
+    sparse_set_deinit(set);
     return 0;
 }
 
 static int _iter_optimized(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)lua_touserdata(L, 1);
+    sparse_set_t *set = (sparse_set_t *)lua_touserdata(L, 1);
     int pos = lua_tointeger(L, 2);
-    if (pos >= (int)sparse_set_size(lset->set)) return 0;
+    if (pos >= (int)sparse_set_size(set)) return 0;
     
-    sparse_set_id_t id = sparse_set_get_id(lset->set, pos);
+    sparse_set_id_t id = sparse_set_get_id(set, pos);
     lua_pushinteger(L, pos + 1);
     lua_pushinteger(L, id);
     lua_rawgeti(L, lua_upvalueindex(1), pos + 1);
@@ -189,10 +157,10 @@ static int _iter_optimized(lua_State *L) {
 }
 
 static int l_set_iter(lua_State *L) {
-    lua_sparse_set_t *lset = (lua_sparse_set_t *)luaL_checkudata(L, 1, SET_METATABLE);
+    sparse_set_t *set = get_set(L);
     lua_getiuservalue(L, 1, 1);
     lua_pushcclosure(L, _iter_optimized, 1);
-    lua_pushlightuserdata(L, lset);
+    lua_pushlightuserdata(L, set);
     lua_pushinteger(L, 0);
     return 3;
 }

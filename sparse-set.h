@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <lua.h>
+#include <lauxlib.h>
 
 typedef uint64_t sparse_set_id_t;
 
@@ -26,6 +28,22 @@ typedef struct {
     uint32_t size;
     uint32_t capacity;
 } sparse_set_t;
+
+static inline sparse_set_t* 
+get_set(lua_State *L){
+    return (sparse_set_t*)lua_touserdata(L, 1);
+}
+
+static inline registry_t*
+get_reg(lua_State *L){
+    return (registry_t*)lua_touserdata(L, 1);
+}
+
+bool sparse_set_init(sparse_set_t *set, uint32_t max_size);
+void sparse_set_deinit(sparse_set_t *set);
+
+bool registry_init(registry_t *reg, uint32_t max_size);
+void registry_deinit(registry_t *reg);
 
 registry_t* registry_create(uint32_t max_size);
 void registry_destroy(registry_t *reg);

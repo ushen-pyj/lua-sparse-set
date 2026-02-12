@@ -7,7 +7,7 @@ LUA_INC = $(shell pkg-config --cflags lua 2>/dev/null || echo "-I/usr/local/incl
 BUILD_DIR = build
 TARGET = $(BUILD_DIR)/sparseset.so
 
-SRCS = sparse-set.c lua-sparse-set.c
+SRCS = register.c sparse-set.c lua-sparse-set.c
 
 all: $(TARGET)
 
@@ -20,6 +20,6 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 test: all
-	lua test.lua
+	lua test/test.lua
 
 .PHONY: all clean test
