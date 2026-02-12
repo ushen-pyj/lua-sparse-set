@@ -7,7 +7,7 @@ for i = 1, size do
     hash_key[i] = "hash_key_" .. i
 end
 
-local function benchmark(name, fn_insert, fn_read, fn_iter)
+local function benchmark(name, fn_insert, fn_read, fn_iter, fn_remove)
     local results = { name = name }
     
     -- Insert
@@ -24,6 +24,11 @@ local function benchmark(name, fn_insert, fn_read, fn_iter)
     start = os.clock()
     fn_iter()
     results.iter = os.clock() - start
+
+    -- Remove
+    start = os.clock()
+    fn_remove()
+    results.remove = os.clock() - start
     
     return results
 end
@@ -44,6 +49,11 @@ local res_array = benchmark("Lua Array",
     function()
         for i, v in ipairs(arr) do
         end
+    end,
+    function()
+        for i = 1, size do
+            table.remove(arr)
+        end
     end
 )
 
@@ -62,6 +72,11 @@ local res_hash = benchmark("Lua Hash",
     end,
     function()
         for i, v in pairs(hash) do
+        end
+    end,
+    function()
+        for _, v in ipairs(hash_key) do
+            hash[v] = nil
         end
     end
 )
@@ -85,6 +100,11 @@ local res_sparse = benchmark("Sparse Set",
     end,
     function()
         for i, v in set:iter() do
+        end
+    end,
+    function()
+        for i = 1, size do
+            set:remove(entities[i])
         end
     end
 )
@@ -119,6 +139,7 @@ local function print_table(all_results)
         print(format_row(res.name, "Insert", res.insert))
         print(format_row("", "Read", res.read))
         print(format_row("", "Iter", res.iter))
+        print(format_row("", "Remove", res.remove))
         print(divider)
     end
 end
