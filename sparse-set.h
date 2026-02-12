@@ -54,4 +54,4 @@ typedef struct {
 sparse_set_iter_t sparse_set_iter(const sparse_set_t *set);
 bool sparse_set_iter_next(sparse_set_iter_t *iter, sparse_set_id_t *out_id);
 
-#endif // SPARSE_SET_H
+#endif

@@ -135,7 +135,7 @@ static int l_set_remove(lua_State *L) {
     lua_rawseti(L, -2, last_pos + 1);
     lua_pop(L, 1);
 
-    set->sparse[index] = 0xFFFFFFFF; // Reset sparse entry
+    set->sparse[index] = 0xFFFFFFFF;
     lua_pushboolean(L, true);
     return 1;
 }
