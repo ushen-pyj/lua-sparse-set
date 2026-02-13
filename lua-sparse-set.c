@@ -78,10 +78,16 @@ static int l_set_insert(lua_State *L) {
     sparse_set_t *set = get_set(L);
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     
-    uint32_t pos = sparse_set_insert(set, id);
+    uint32_t pos = sparse_set_index_of(set, id);
+    bool is_new = false;
+    
     if (pos == SPARSE_SET_INVALID_POS) {
-        lua_pushboolean(L, false);
-        return 1;
+        pos = sparse_set_insert(set, id);
+        if (pos == SPARSE_SET_INVALID_POS) {
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        is_new = true;
     }
     
     if (set->stride > 0) {
@@ -103,7 +109,7 @@ static int l_set_insert(lua_State *L) {
         lua_pop(L, 1);
     }
 
-    lua_pushboolean(L, true);
+    lua_pushboolean(L, is_new);
     return 1;
 }
 
