@@ -84,7 +84,7 @@ local res_hash = benchmark("Lua Hash",
 )
 
 local reg = sparse_set.new_registry(size)
-local set = sparse_set.new_set(size)
+local set = sparse_set.new_set()
 local entities = {}
 local create = reg.create
 local insert = set.insert
@@ -112,6 +112,79 @@ local res_sparse = benchmark("Sparse Set",
             remove(set, entities[i])
         end
     end
+)
+
+local reg_c = sparse_set.new_registry(size)
+-- Stride 8 bytes (e.g. 2 ints)
+local set_c = sparse_set.new_set(8)
+local entities_c = {}
+local create_c = reg_c.create
+local insert_c = set_c.insert
+local packed_data = string.pack("ii", 123, 456)
+local unpack = string.unpack
+
+local res_c_comp = benchmark("C Component",
+    function()
+        for i = 1, size do
+            local e = create_c(reg_c)
+            entities_c[i] = e
+            insert_c(set_c, e, packed_data)
+        end
+    end,
+    function()
+        local get = set_c.get
+        for i = 1, size do
+            local raw = get(set_c, entities_c[i])
+            local a, b = unpack("ii", raw)
+        end
+    end,
+    function()
+        for i, v in set_c:iter() do
+        end
+    end,
+    function()
+        local remove = set_c.remove
+        for i = 1, size do
+            remove(set_c, entities_c[i])
+        end
+    end
+)
+
+-- Benchmark for get_field/set_field specifically
+local reg_f = sparse_set.new_registry(size)
+local set_f = sparse_set.new_set(8)
+local entities_f = {}
+for i = 1, size do
+    local e = reg_f:create()
+    entities_f[i] = e
+    set_f:insert(e, packed_data)
+end
+local get_field = set_f.get_field
+local set_field = set_f.set_field
+
+local c_type = {
+    INT = 1,
+    FLOAT = 2,
+    DOUBLE = 3,
+    BYTE = 4,
+    BOOL = 5,
+}
+
+local res_field_access = benchmark("C Field Access",
+    function()
+         local type_int = c_type.INT
+         for i = 1, size do
+            set_field(set_f, entities_f[i], 0, type_int, i)
+        end
+    end,
+    function()
+        local type_int = c_type.INT
+        for i = 1, size do
+            local v = get_field(set_f, entities_f[i], 0, type_int)
+        end
+    end,
+    function() end, -- skip iter
+    function() end  -- skip remove
 )
 
 local function print_table(all_results)
@@ -149,4 +222,4 @@ local function print_table(all_results)
     end
 end
 
-print_table({res_array, res_hash, res_sparse})
+print_table({res_array, res_hash, res_sparse, res_c_comp, res_field_access})

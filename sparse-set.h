@@ -33,6 +33,8 @@ typedef struct {
     sparse_set_id_t *dense;
     uint32_t size;
     uint32_t dense_capacity;
+    uint32_t stride;
+    uint8_t *data;
 } sparse_set_t;
 
 static inline sparse_set_t* 
@@ -74,6 +76,9 @@ uint32_t sparse_set_size(const sparse_set_t *set);
 sparse_set_id_t sparse_set_get_id(const sparse_set_t *set, uint32_t pos);
 uint32_t sparse_set_index_of(const sparse_set_t *set, sparse_set_id_t id);
 void sparse_set_swap_at(sparse_set_t *set, uint32_t a, uint32_t b);
+
+bool sparse_set_set_stride(sparse_set_t *set, uint32_t stride);
+void* sparse_set_get_data(const sparse_set_t *set, uint32_t pos);
 
 typedef struct {
     const sparse_set_t *set;

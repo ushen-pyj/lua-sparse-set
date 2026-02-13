@@ -1,10 +1,18 @@
 #include <lua.h>
 #include <lualib.h>
 #include <lauxlib.h>
+#include <string.h>
 #include "sparse-set.h"
 
 #define REGISTRY_METATABLE "SparseRegistry"
 #define SET_METATABLE "SparseSet"
+
+#define TYPE_INT 1
+#define TYPE_FLOAT 2
+#define TYPE_DOUBLE 3
+#define TYPE_BYTE 4
+#define TYPE_BOOL 5
+
 
 static int l_reg_create(lua_State *L) {
     registry_t *reg = (registry_t *)lua_newuserdatauv(L, sizeof(registry_t), 0);
@@ -44,8 +52,19 @@ static int l_reg_gc(lua_State *L) {
 }
 
 static int l_set_create(lua_State *L) {
+    int stride = 0;
+    if (lua_gettop(L) >= 1) {
+        stride = luaL_checkinteger(L, 1);
+    }
+
     sparse_set_t *set = (sparse_set_t *)lua_newuserdatauv(L, sizeof(sparse_set_t), 1);
     if (!sparse_set_init(set)) return luaL_error(L, "Failed to create set");
+
+    if (stride > 0) {
+        if (!sparse_set_set_stride(set, stride)) {
+            return luaL_error(L, "Failed to set stride");
+        }
+    }
     
     lua_newtable(L);
     lua_setiuservalue(L, -2, 1);
@@ -65,10 +84,24 @@ static int l_set_insert(lua_State *L) {
         return 1;
     }
     
-    lua_getiuservalue(L, 1, 1);
-    lua_pushvalue(L, 3);
-    lua_rawseti(L, -2, pos + 1);
-    lua_pop(L, 1);
+    if (set->stride > 0) {
+        if (!lua_isnil(L, 3)) {
+            size_t len;
+            const char *data = luaL_checklstring(L, 3, &len);
+            if (len != set->stride) {
+                return luaL_error(L, "Data size mismatch, expected %d got %d", set->stride, (int)len);
+            }
+            void *ptr = sparse_set_get_data(set, pos);
+            if (ptr) {
+                memcpy(ptr, data, len);
+            }
+        }
+    } else {
+        lua_getiuservalue(L, 1, 1);
+        lua_pushvalue(L, 3);
+        lua_rawseti(L, -2, pos + 1);
+        lua_pop(L, 1);
+    }
 
     lua_pushboolean(L, true);
     return 1;
@@ -115,8 +148,17 @@ static int l_set_get(lua_State *L) {
         uint32_t page_idx = index >> SPARSE_SET_PAGE_SHIFT;
         uint32_t offset = index & SPARSE_SET_PAGE_MASK;
         uint32_t pos = set->sparse[page_idx][offset];
-        lua_getiuservalue(L, 1, 1);
-        lua_rawgeti(L, -1, pos + 1);
+        if (set->stride > 0) {
+            void *ptr = sparse_set_get_data(set, pos);
+            if (ptr) {
+                lua_pushlstring(L, (const char *)ptr, set->stride);
+            } else {
+                lua_pushnil(L);
+            }
+        } else {
+            lua_getiuservalue(L, 1, 1);
+            lua_rawgeti(L, -1, pos + 1);
+        }
         return 1;
     }
     return 0;
@@ -149,7 +191,17 @@ static int _iter_optimized(lua_State *L) {
     sparse_set_id_t id = sparse_set_get_id(set, pos);
     lua_pushinteger(L, pos + 1);
     lua_pushinteger(L, id);
-    lua_rawgeti(L, lua_upvalueindex(1), pos + 1);
+    
+    if (set->stride > 0) {
+        void *ptr = sparse_set_get_data(set, pos);
+        if (ptr) {
+            lua_pushlstring(L, (const char *)ptr, set->stride);
+        } else {
+            lua_pushnil(L);
+        }
+    } else {
+        lua_rawgeti(L, lua_upvalueindex(1), pos + 1);
+    }
     return 3;
 }
 
@@ -212,10 +264,114 @@ static int l_set_at(lua_State *L) {
     
     lua_pushinteger(L, id);
     
-    lua_getiuservalue(L, 1, 1);
-    lua_rawgeti(L, -1, index);
-    lua_remove(L, -2);
+    if (set->stride > 0) {
+        void *ptr = sparse_set_get_data(set, index - 1);
+        if (ptr) {
+            lua_pushlstring(L, (const char *)ptr, set->stride);
+        } else {
+            lua_pushnil(L);
+        }
+    } else {
+        lua_getiuservalue(L, 1, 1);
+        lua_rawgeti(L, -1, index);
+        lua_remove(L, -2);
+    }
     return 2;
+}
+
+static int l_set_get_field(lua_State *L) {
+    sparse_set_t *set = get_set(L);
+    sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
+    int offset = luaL_checkinteger(L, 3);
+    int type = luaL_checkinteger(L, 4);
+    if (type == TYPE_BOOL) type = TYPE_BYTE;
+    
+    uint32_t index = sparse_set_index_of(set, id);
+    if (index == SPARSE_SET_INVALID_POS) return 0;
+    
+    void *base = sparse_set_get_data(set, index);
+    if (!base) return 0;
+    
+    if (offset < 0 || (uint32_t)offset >= set->stride) {
+        return luaL_error(L, "Offset out of bounds");
+    }
+    
+    uint8_t *ptr = (uint8_t*)base + offset;
+    
+    switch (type) {
+        case TYPE_INT: {
+            int val;
+            memcpy(&val, ptr, sizeof(int));
+            lua_pushinteger(L, val);
+            break;
+        }
+        case TYPE_FLOAT: {
+            float val;
+            memcpy(&val, ptr, sizeof(float));
+            lua_pushnumber(L, val);
+            break;
+        }
+        case TYPE_DOUBLE: {
+            double val;
+            memcpy(&val, ptr, sizeof(double));
+            lua_pushnumber(L, val);
+            break;
+        }
+        case TYPE_BYTE: {
+            uint8_t val = *ptr;
+            lua_pushinteger(L, val);
+            break;
+        }
+        default:
+            return luaL_error(L, "Unknown type %d", type);
+    }
+    return 1;
+}
+
+static int l_set_set_field(lua_State *L) {
+    sparse_set_t *set = get_set(L);
+    sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
+    int offset = luaL_checkinteger(L, 3);
+    int type = luaL_checkinteger(L, 4);
+    if (type == TYPE_BOOL) type = TYPE_BYTE;
+
+    uint32_t index = sparse_set_index_of(set, id);
+    if (index == SPARSE_SET_INVALID_POS) return 0;
+    
+    void *base = sparse_set_get_data(set, index);
+    if (!base) return 0;
+    
+    if (offset < 0 || (uint32_t)offset >= set->stride) {
+        return luaL_error(L, "Offset out of bounds");
+    }
+    
+    uint8_t *ptr = (uint8_t*)base + offset;
+    
+    switch (type) {
+        case TYPE_INT: {
+            int val = (int)luaL_checkinteger(L, 5);
+            memcpy(ptr, &val, sizeof(int));
+            break;
+        }
+        case TYPE_FLOAT: {
+            float val = (float)luaL_checknumber(L, 5);
+            memcpy(ptr, &val, sizeof(float));
+            break;
+        }
+        case TYPE_DOUBLE: {
+            double val = (double)luaL_checknumber(L, 5);
+            memcpy(ptr, &val, sizeof(double));
+            break;
+        }
+        case TYPE_BYTE: {
+            int val = luaL_checkinteger(L, 5);
+            *ptr = (uint8_t)val;
+            break;
+        }
+        default:
+            return luaL_error(L, "Unknown type %d", type);
+    }
+    return 0;
 }
 
 static const struct luaL_Reg reg_methods[] = {
@@ -235,6 +391,8 @@ static const struct luaL_Reg set_methods[] = {
     {"get", l_set_get},
     {"size", l_set_size},
     {"iter", l_set_iter},
+    {"get_field", l_set_get_field},
+    {"set_field", l_set_set_field},
     {NULL, NULL}
 };
 
@@ -260,6 +418,8 @@ int luaopen_sparseset(lua_State *L) {
     lua_setfield(L, -2, "new_registry");
     lua_pushcfunction(L, l_set_create);
     lua_setfield(L, -2, "new_set");
+    
+
     
     return 1;
 }

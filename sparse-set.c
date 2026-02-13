@@ -16,6 +16,8 @@ bool sparse_set_init(sparse_set_t *set) {
     set->size = 0;
     set->dense_capacity = SPARSE_SET_DEFAULT_CAPACITY;
     set->sparse_capacity = SPARSE_SET_DEFAULT_CAPACITY;
+    set->stride = 0;
+    set->data = NULL;
     return true;
 }
 
@@ -28,8 +30,11 @@ void sparse_set_deinit(sparse_set_t *set) {
             free(set->sparse);
         }
         if (set->dense) free(set->dense);
+        if (set->data) free(set->data);
         set->sparse = NULL;
         set->dense = NULL;
+        set->data = NULL;
+        set->stride = 0;
     }
 }
 
@@ -38,6 +43,15 @@ static bool sparse_set_grow_dense(sparse_set_t *set) {
     sparse_set_id_t *new_dense = (sparse_set_id_t*)realloc(set->dense, new_capacity * sizeof(sparse_set_id_t));
     if (!new_dense) return false;
     set->dense = new_dense;
+    
+    if (set->stride > 0) {
+        uint8_t *new_data = (uint8_t*)realloc(set->data, new_capacity * set->stride);
+        if (!new_data) {
+            return false;
+        }
+        set->data = new_data;
+    }
+    
     set->dense_capacity = new_capacity;
     return true;
 }
@@ -117,6 +131,11 @@ uint32_t sparse_set_insert(sparse_set_t *set, sparse_set_id_t id) {
 
     uint32_t new_pos = set->size;
     set->dense[new_pos] = id;
+    
+    if (set->stride > 0) {
+        memset(set->data + new_pos * set->stride, 0, set->stride);
+    }
+    
     page[offset] = new_pos;
     set->size++;
     return new_pos;
@@ -135,13 +154,15 @@ bool sparse_set_remove(sparse_set_t *set, sparse_set_id_t id) {
     uint32_t last_index = ID_INDEX(last_id);
 
     set->dense[pos] = last_id;
-    
-    // Update last entity's sparse pointer
+
     uint32_t last_page_idx = last_index >> SPARSE_SET_PAGE_SHIFT;
     uint32_t last_offset = last_index & SPARSE_SET_PAGE_MASK;
     set->sparse[last_page_idx][last_offset] = pos;
     
-    // Clear old pos
+    if (set->stride > 0) {
+        memcpy(set->data + pos * set->stride, set->data + last_pos * set->stride, set->stride);
+    }
+    
     set->sparse[page_idx][offset] = SPARSE_SET_INVALID_POS;
     
     set->size--;
@@ -149,7 +170,6 @@ bool sparse_set_remove(sparse_set_t *set, sparse_set_id_t id) {
 }
 
 void sparse_set_clear(sparse_set_t *set) {
-    // Usually we don't free pages on clear for performance
     for (uint32_t i = 0; i < set->sparse_capacity; i++) {
         if (set->sparse[i]) {
             memset(set->sparse[i], 0xFF, SPARSE_SET_PAGE_SIZE * sizeof(uint32_t));
@@ -205,6 +225,25 @@ void sparse_set_swap_at(sparse_set_t *set, uint32_t a, uint32_t b) {
     
     set->sparse[page_a][off_a] = b;
     set->sparse[page_b][off_b] = a; 
+    
+    if (set->stride > 0) {
+        uint8_t *ptr_a = set->data + a * set->stride;
+        uint8_t *ptr_b = set->data + b * set->stride;
+        uint8_t buffer[64];
+        uint32_t remaining = set->stride;
+        uint32_t offset = 0;
+        
+        while (remaining > 0) {
+            uint32_t chunk_size = (remaining > sizeof(buffer)) ? sizeof(buffer) : remaining;
+            
+            memcpy(buffer, ptr_a + offset, chunk_size);
+            memcpy(ptr_a + offset, ptr_b + offset, chunk_size);
+            memcpy(ptr_b + offset, buffer, chunk_size);
+            
+            remaining -= chunk_size;
+            offset += chunk_size;
+        }
+    } 
 }
 
 sparse_set_iter_t sparse_set_iter(const sparse_set_t *set) {
@@ -221,4 +260,18 @@ bool sparse_set_iter_next(sparse_set_iter_t *iter, sparse_set_id_t *out_id) {
     }
     iter->current_pos++;
     return true;
+}
+
+bool sparse_set_set_stride(sparse_set_t *set, uint32_t stride) {
+    if (set->size > 0 || set->data) return false; // Can only set stride when empty/init
+    if (stride == 0) return true;
+    
+    set->stride = stride;
+    set->data = (uint8_t*)calloc(set->dense_capacity, stride);
+    return set->data != NULL;
+}
+
+void* sparse_set_get_data(const sparse_set_t *set, uint32_t pos) {
+    if (pos >= set->size || !set->data) return NULL;
+    return set->data + pos * set->stride;
 }
