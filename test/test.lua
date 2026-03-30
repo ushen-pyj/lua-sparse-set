@@ -20,6 +20,17 @@ local function assert_false(a, msg)
     end
 end
 
+local function assert_error(fn, msg)
+    local ok = pcall(fn)
+    if ok then
+        error(string.format("%s: expected error, got success", msg or "Assertion failed"))
+    end
+end
+
+local function id_index(id)
+    return id & 0xFFFFFFFF
+end
+
 local function test_registry()
     print("Testing Registry...")
     local reg = sparse_set.new_registry()
@@ -42,6 +53,9 @@ local function test_registry()
     -- This specific check depends on implementation details, but we can check it's valid
     assert_true(reg:valid(id3), "Recycled ID should be valid")
     assert_true(id3 ~= id1, "Recycled ID should differ from original (versioning)")
+    assert_eq(id_index(id3), id_index(id1), "Recycled ID should reuse same index")
+
+    assert_error(function() sparse_set.new_registry(123) end, "new_registry should reject arguments")
     
     print("Registry tests passed.")
 end
@@ -124,6 +138,11 @@ local function test_lua_set()
     assert_false(set:contains(id1), "Should not contain id1")
     assert_true(set:contains(id2), "Should still contain id2")
     assert_eq(set:get(id1), nil, "Get removed ID should return nil")
+
+    local invalid_id = 0x100000
+    local inserted, err = set:insert(invalid_id, "bad")
+    assert_eq(inserted, nil, "Insert failure should return nil")
+    assert_eq(err, "oom", "Insert failure reason should be oom")
     
     print("Lua Set tests passed.")
 end
@@ -157,23 +176,29 @@ local function test_c_set()
     
     -- Set Field / Get Field
     -- offset 0, type INT (1)
-    local TYPE_INT = 1
-    local TYPE_BYTE = 4 -- Just guessing types from previous context. 
-    -- wait, let's verify types from C code:
-    -- #define TYPE_INT 1
-    -- #define TYPE_FLOAT 2
-    -- #define TYPE_DOUBLE 3
-    -- #define TYPE_BYTE 4
-    -- #define TYPE_BOOL 5
+    local TYPE_INT = sparse_set.TYPE_INT
+    local TYPE_BYTE = sparse_set.TYPE_BYTE
+    local TYPE_BOOL = sparse_set.TYPE_BOOL
+    assert_eq(TYPE_INT, 1, "TYPE_INT const")
+    assert_eq(TYPE_BYTE, 4, "TYPE_BYTE const")
+    assert_eq(TYPE_BOOL, 5, "TYPE_BOOL const")
     
     -- Read back 10 as float? No, stick to int.
     local f1 = set:get_field(id1, 0, TYPE_INT)
     assert_eq(f1, 10, "get_field int mismatch")
     
     -- Modify second int (offset 4)
-    set:set_field(id1, 4, TYPE_INT, 99)
+    local changed = set:set_field(id1, 4, TYPE_INT, 99)
+    assert_true(changed, "set_field should return true for existing id")
     local f2 = set:get_field(id1, 4, TYPE_INT)
     assert_eq(f2, 99, "set_field verification failed")
+
+    local missing_id = reg:create()
+    assert_eq(set:get_field(missing_id, 0, TYPE_INT), nil, "get_field on missing id should return nil")
+    assert_false(set:set_field(missing_id, 0, TYPE_INT, 1), "set_field on missing id should return false")
+
+    assert_error(function() set:get_field(id1, stride - 1, TYPE_INT) end, "get_field should reject overflow read")
+    assert_error(function() set:set_field(id1, stride - 1, TYPE_INT, 1) end, "set_field should reject overflow write")
     
     -- Swap
     local idx1 = set:index_of(id1)
@@ -211,6 +236,19 @@ local function test_c_set()
         assert_eq(#data, stride, "Iter data length mismatch")
     end
     assert_eq(count, 1, "Iter count should be 1 after removal")
+
+    local set_no_stride = sparse_set.new_set()
+    assert_error(function() set_no_stride:get_field(id2, 0, TYPE_INT) end, "stride=0 get_field should error")
+    assert_error(function() set_no_stride:set_field(id2, 0, TYPE_INT, 1) end, "stride=0 set_field should error")
+
+    -- Bool uses 1-byte storage with truthy mapping
+    local bool_set = sparse_set.new_set(1)
+    local bool_id = reg:create()
+    bool_set:insert(bool_id, string.pack("B", 0))
+    bool_set:set_field(bool_id, 0, TYPE_BOOL, true)
+    assert_true(bool_set:get_field(bool_id, 0, TYPE_BOOL), "bool true write/read")
+    bool_set:set_field(bool_id, 0, TYPE_BOOL, false)
+    assert_false(bool_set:get_field(bool_id, 0, TYPE_BOOL), "bool false write/read")
 
     print("C Set tests passed.")
 end

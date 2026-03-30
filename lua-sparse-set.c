@@ -13,8 +13,26 @@
 #define TYPE_BYTE 4
 #define TYPE_BOOL 5
 
+static size_t field_type_size(int type) {
+    switch (type) {
+        case TYPE_INT:
+            return sizeof(int);
+        case TYPE_FLOAT:
+            return sizeof(float);
+        case TYPE_DOUBLE:
+            return sizeof(double);
+        case TYPE_BYTE:
+        case TYPE_BOOL:
+            return sizeof(uint8_t);
+        default:
+            return 0;
+    }
+}
 
 static int l_reg_create(lua_State *L) {
+    if (lua_gettop(L) != 0) {
+        return luaL_error(L, "new_registry() does not accept arguments");
+    }
     registry_t *reg = (registry_t *)lua_newuserdatauv(L, sizeof(registry_t), 0);
     if (!registry_init(reg)) return luaL_error(L, "Failed to create registry");
 
@@ -26,8 +44,12 @@ static int l_reg_create(lua_State *L) {
 static int l_reg_create_id(lua_State *L) {
     registry_t *reg = get_reg(L);
     sparse_set_id_t id = registry_create_id(reg);
-    if (id == ID_NULL) lua_pushnil(L);
-    else lua_pushinteger(L, id);
+    if (id == ID_NULL) {
+        lua_pushnil(L);
+        lua_pushstring(L, "oom");
+        return 2;
+    }
+    lua_pushinteger(L, id);
     return 1;
 }
 
@@ -52,9 +74,17 @@ static int l_reg_gc(lua_State *L) {
 }
 
 static int l_set_create(lua_State *L) {
+    int nargs = lua_gettop(L);
+    if (nargs > 1) {
+        return luaL_error(L, "new_set([stride]) accepts at most one argument");
+    }
+
     int stride = 0;
-    if (lua_gettop(L) >= 1) {
+    if (nargs == 1) {
         stride = luaL_checkinteger(L, 1);
+        if (stride < 0) {
+            return luaL_error(L, "stride must be >= 0");
+        }
     }
 
     sparse_set_t *set = (sparse_set_t *)lua_newuserdatauv(L, sizeof(sparse_set_t), 1);
@@ -84,8 +114,9 @@ static int l_set_insert(lua_State *L) {
     if (pos == SPARSE_SET_INVALID_POS) {
         pos = sparse_set_insert(set, id);
         if (pos == SPARSE_SET_INVALID_POS) {
-            lua_pushboolean(L, false);
-            return 1;
+            lua_pushnil(L);
+            lua_pushstring(L, "oom");
+            return 2;
         }
         is_new = true;
     }
@@ -167,7 +198,8 @@ static int l_set_get(lua_State *L) {
         }
         return 1;
     }
-    return 0;
+    lua_pushnil(L);
+    return 1;
 }
 
 static int l_set_contains(lua_State *L) {
@@ -290,15 +322,29 @@ static int l_set_get_field(lua_State *L) {
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     int offset = luaL_checkinteger(L, 3);
     int type = luaL_checkinteger(L, 4);
-    if (type == TYPE_BOOL) type = TYPE_BYTE;
+
+    if (set->stride == 0) {
+        return luaL_error(L, "get_field requires set created with stride > 0");
+    }
+
+    size_t type_size = field_type_size(type);
+    if (type_size == 0) {
+        return luaL_error(L, "Unknown type %d", type);
+    }
     
     uint32_t index = sparse_set_index_of(set, id);
-    if (index == SPARSE_SET_INVALID_POS) return 0;
+    if (index == SPARSE_SET_INVALID_POS) {
+        lua_pushnil(L);
+        return 1;
+    }
     
     void *base = sparse_set_get_data(set, index);
-    if (!base) return 0;
+    if (!base) {
+        lua_pushnil(L);
+        return 1;
+    }
     
-    if (offset < 0 || (uint32_t)offset >= set->stride) {
+    if (offset < 0 || (size_t)offset + type_size > set->stride) {
         return luaL_error(L, "Offset out of bounds");
     }
     
@@ -328,6 +374,11 @@ static int l_set_get_field(lua_State *L) {
             lua_pushinteger(L, val);
             break;
         }
+        case TYPE_BOOL: {
+            uint8_t val = *ptr;
+            lua_pushboolean(L, val != 0);
+            break;
+        }
         default:
             return luaL_error(L, "Unknown type %d", type);
     }
@@ -339,15 +390,29 @@ static int l_set_set_field(lua_State *L) {
     sparse_set_id_t id = (sparse_set_id_t)luaL_checkinteger(L, 2);
     int offset = luaL_checkinteger(L, 3);
     int type = luaL_checkinteger(L, 4);
-    if (type == TYPE_BOOL) type = TYPE_BYTE;
+
+    if (set->stride == 0) {
+        return luaL_error(L, "set_field requires set created with stride > 0");
+    }
+
+    size_t type_size = field_type_size(type);
+    if (type_size == 0) {
+        return luaL_error(L, "Unknown type %d", type);
+    }
 
     uint32_t index = sparse_set_index_of(set, id);
-    if (index == SPARSE_SET_INVALID_POS) return 0;
+    if (index == SPARSE_SET_INVALID_POS) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
     
     void *base = sparse_set_get_data(set, index);
-    if (!base) return 0;
+    if (!base) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
     
-    if (offset < 0 || (uint32_t)offset >= set->stride) {
+    if (offset < 0 || (size_t)offset + type_size > set->stride) {
         return luaL_error(L, "Offset out of bounds");
     }
     
@@ -374,10 +439,15 @@ static int l_set_set_field(lua_State *L) {
             *ptr = (uint8_t)val;
             break;
         }
+        case TYPE_BOOL: {
+            *ptr = lua_toboolean(L, 5) ? 1 : 0;
+            break;
+        }
         default:
             return luaL_error(L, "Unknown type %d", type);
     }
-    return 0;
+    lua_pushboolean(L, true);
+    return 1;
 }
 
 static const struct luaL_Reg reg_methods[] = {
@@ -424,6 +494,16 @@ int luaopen_sparseset(lua_State *L) {
     lua_setfield(L, -2, "new_registry");
     lua_pushcfunction(L, l_set_create);
     lua_setfield(L, -2, "new_set");
+    lua_pushinteger(L, TYPE_INT);
+    lua_setfield(L, -2, "TYPE_INT");
+    lua_pushinteger(L, TYPE_FLOAT);
+    lua_setfield(L, -2, "TYPE_FLOAT");
+    lua_pushinteger(L, TYPE_DOUBLE);
+    lua_setfield(L, -2, "TYPE_DOUBLE");
+    lua_pushinteger(L, TYPE_BYTE);
+    lua_setfield(L, -2, "TYPE_BYTE");
+    lua_pushinteger(L, TYPE_BOOL);
+    lua_setfield(L, -2, "TYPE_BOOL");
     
 
     

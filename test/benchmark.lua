@@ -83,7 +83,7 @@ local res_hash = benchmark("Lua Hash",
     end
 )
 
-local reg = sparse_set.new_registry(size)
+local reg = sparse_set.new_registry()
 local set = sparse_set.new_set()
 local entities = {}
 local create = reg.create
@@ -114,7 +114,7 @@ local res_sparse = benchmark("Sparse Set",
     end
 )
 
-local reg_c = sparse_set.new_registry(size)
+local reg_c = sparse_set.new_registry()
 -- Stride 8 bytes (e.g. 2 ints)
 local set_c = sparse_set.new_set(8)
 local entities_c = {}
@@ -151,7 +151,7 @@ local res_c_comp = benchmark("C Component",
 )
 
 -- Benchmark for get_field/set_field specifically
-local reg_f = sparse_set.new_registry(size)
+local reg_f = sparse_set.new_registry()
 local set_f = sparse_set.new_set(8)
 local entities_f = {}
 for i = 1, size do
